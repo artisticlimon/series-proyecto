@@ -1,0 +1,760 @@
+---
+title: "proyecto series de tiempo"
+author: "Marianne Peña Wust C05845"
+date: "2026-08-30"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Paquetes
+
+```{r}
+library(forecast)
+library(ggplot2)
+library(tseries)
+library(fpp2)
+library(astsa)
+library(car)
+library(urca)
+library(dplyr)
+```
+
+# Carga de datos y exploración inicial
+
+```{r}
+df <- read.csv(r"(C:\Users\nan\OneDrive\Documentos\ucr\practica profesiona\dengue-model\full_data.csv)")
+mingo  <- df |> filter(grepl("-403", week_canton)) |> dplyr::select(week_canton, ndvi, temp_prom_lag_1, precip_total_lag_1)
+```
+
+```{r}
+ndvi <- ts(mingo$ndvi, start = c(2020, 9), frequency = 52)
+```
+
+```{r}
+# png(r"(C:\Users\nan\OneDrive - Universidad de Costa Rica\cuenta personal\ucr pers\2026 IIC\series\proyecto series\serie_tiempo_ndvi.png)", width = 800, height = 300)
+
+plot(ndvi, type = "l", xlab = "Año", ylab = "NDVI", main = "")
+
+# dev.off()
+```
+```{r}
+# png(r"(C:\Users\nan\OneDrive - Universidad de Costa Rica\cuenta personal\ucr pers\2026 IIC\series\proyecto series\estacionalidad.png)", width = 700, height = 400)
+
+ggseasonplot(ndvi, year.labels=FALSE, continuous=TRUE, main = "", xlab = "Semana") + 
+  labs(colour = "Año") +
+  scale_color_viridis_c(option = "turbo") 
+
+# dev.off()
+```
+
+```{r}
+ndvi_desc <- decompose(ndvi, type = "additive")
+
+# png(r"(C:\Users\nan\OneDrive - Universidad de Costa Rica\cuenta personal\ucr pers\2026 IIC\series\proyecto series\autoplots.png)", width = 700, height = 400)
+
+autoplot(ndvi_desc, range.bars = FALSE, main = "")
+
+# dev.off()
+```
+
+```{r}
+# png(r"(C:\Users\nan\OneDrive - Universidad de Costa Rica\cuenta personal\ucr pers\2026 IIC\series\proyecto series\ACF.png)", width = 700, height = 400)
+ggAcf(ndvi, title = "", lag.max = 210)
+158+52
+#dev.off()
+```
+# Division de datos
+```{r}
+train <- window(ndvi, start = c(2020, 9), end = c(2024, 52), frequency = 52)
+test <- window(ndvi, start = c(2025, 1), end = c(2025, 52), frequency = 52)
+```
+
+# Suavizamiento
+
+### Holt Winters-Aditivo
+
+```{r}
+ht1 <- HoltWinters(train, seasonal = "additive")
+
+plot(ht1)
+```
+
+```{r}
+ht1$alpha
+ht1$beta
+ht1$gamma
+```
+Por el valor de beta, el modelo esta indicando que no existe tendencia. Mientras que el valor cercano a 1 indica que existe una alta estacionalidad.
+
+```{r}
+pronostico1 <- forecast(ht1, h = 52)
+accuracy(pronostico1)
+```
+
+
+```{r}
+ajuste1=fitted(ht1)
+pred1=accuracy(pronostico1, as.numeric(test));pred1
+```
+
+```{r}
+autoplot(pronostico1) +
+  autolayer(test, series = "Actual Test Data",
+            color = "red", linetype = "dashed") +
+  labs(
+    title = "NDVI Reales (rojo) contra predichos (azul)",
+    x = "Semana",
+    y = "NDVI"
+  ) +
+  guides(
+    colour = guide_legend(title = "Series"),
+    fill = "none"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+### TBATS
+```{r}
+#este es otro modelo que encontré pero no es equivalente (teoricamente) a la función Hw(). Fuente: https://otexts.com/fpp2/advanced.html#sec-complexseasonality
+ht2 <-  tbats(
+  train,
+  use.box.cox = TRUE,
+  use.trend = TRUE,
+  use.damped.trend = TRUE,
+  seasonal.periods = 52
+)
+```
+
+```{r}
+summary(ht2)
+```
+
+
+```{r}
+ht2$lambda
+ht2$alpha
+ht2$beta
+ht2$damping.parameter
+ht2$gamma.one.values
+ht2$gamma.two.values
+ht2$ar.coefficients
+ht2$ma.coefficients
+```
+```{r}
+ajuste2=fitted(ht2)
+accuracy(ajuste2, train)
+```
+
+```{r}
+pronostico2 <- forecast(ht2, h = 52, level = 95)
+pred2=accuracy(pronostico2, as.numeric(test));pred2
+```
+```{r}
+# png(filename = "C:/Users/nan/OneDrive - Universidad de Costa Rica/cuenta personal/ucr pers/2026 IIC/series/proyecto series/residuales_ganador.png", width = 1800, height = 1200, res = 300)
+checkresiduals(ht2)
+# dev.off()
+```
+
+```{r}
+reshw2=residuals(ht2)
+shapiro.test(reshw2)
+qqPlot(reshw2)
+```
+
+
+```{r}
+autoplot(pronostico2, PI = TRUE,
+  fcol = "red",
+  shadecols = c("pink")) +
+  autolayer(fitted(ht2), series = "Actual Test Data",
+            color = "red") +
+  autolayer(ndvi, series = "Actual Test Data",
+            color = "black") +
+  labs(
+    title = "",
+    x = "Semana",
+    y = "NDVI"
+  ) +
+  guides(
+    colour = guide_legend(title = "Series"),
+    fill = "none"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  theme(
+    text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text = element_text(size = 13, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12, face = "bold")
+  )
+
+ggsave(filename = "C:/Users/nan/OneDrive - Universidad de Costa Rica/cuenta personal/ucr pers/2026 IIC/series/proyecto series/pronostico_ganador.png", height = 6, width= 10, units = "in", dpi = 300)
+```
+
+# ARIMA
+
+```{r}
+ndvi_dif <- diff(train, 52)
+plot(ndvi_dif)
+acf2(ndvi_dif, max.lag = 104)
+```
+
+Por un lado, se ve que en el ACF hay un decrecimiento estacional, y en el PACF, el ultimo significativo es en el rezago estacional 1. Hay picos marcados en el rezago 3 de la PACF y en el 2 de la ACF. Entonces, se propone: SARIMA(3, 0, 2)(1, 1, 0).
+
+```{r}
+mod1_arima <- Arima(train, order = c(3, 0, 2), seasonal = list(order = c(1, 1, 0), period = 52))
+```
+
+```{r}
+summary(mod1_arima)
+```
+```{r}
+checkresiduals(mod1_arima)
+```
+No hay autocorrelación de los residuos y los coeficientes están bien. 
+
+```{r}
+shapiro.test(mod1_arima$residuals)
+```
+
+```{r}
+qqPlot(mod1_arima$residuals)
+```
+No hay normalidad. No obstante, la desviación de este supuesto no es tan grave como la autocorrelación de los residuos, por lo que se acepta este modelo. 
+
+Igualmente, lo vamos a intentar corregir con una transformación de Box Cox
+
+```{r}
+mod2_arima <- Arima(train, order = c(3, 0, 2), seasonal = list(order = c(1, 1, 0), period = 52), lambda = 0)
+```
+
+```{r}
+summary(mod2_arima)
+```
+```{r}
+checkresiduals(mod2_arima)
+```
+No hay autocorrelación de los residuos y los coeficientes están bien. 
+
+```{r}
+shapiro.test(mod2_arima$residuals)
+```
+
+```{r}
+qqPlot(mod2_arima$residuals)
+```
+Igual no se cumple la normalidad. Igualmente, vamos a comparar estos dos modelos para definir el ganador. 
+
+```{r}
+forecast_arima_1 <- forecast(mod1_arima, h = 52)
+accuracy(as.numeric(forecast_arima_1$mean), as.numeric(test))
+```
+```{r}
+forecast_arima_2 <- forecast(mod2_arima, h = 52)
+accuracy(as.numeric(forecast_arima_2$mean), as.numeric(test))
+```
+
+Son muy parecidos, con el modelo 1 teniendo mejor ajuste, que además es un buen ajuste. Sin embargo, sería más apropiado probar con regresión dinámica por el supuesto de normalidad. 
+
+```{r}
+autoplot(forecast_arima_1) +
+  autolayer(test, series = "Actual Test Data",
+            color = "red", linetype = "dashed") +
+  labs(
+    title = "NDVI Reales (rojo) contra predichos (azul)",
+    x = "Semana",
+    y = "NDVI"
+  ) +
+  guides(
+    colour = guide_legend(title = "Series"),
+    fill = "none"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+```{r}
+autoplot(forecast_arima_2) +
+  autolayer(test, series = "Actual Test Data",
+            color = "red", linetype = "dashed") +
+  labs(
+    title = "NDVI Reales (rojo) contra predichos (azul)",
+    x = "Semana",
+    y = "NDVI"
+  ) +
+  guides(
+    colour = guide_legend(title = "Series"),
+    fill = "none"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+# Regresión
+
+Ver grafico de descomposicion: hay una tendencia cuadratica y estacionalidad, por lo que tener el tiempo al cuadrado y los meses como covariable seria interesante. Tambien se va a ver las otras variables.
+
+```{r}
+mod1_reg <- tslm(train ~ trend+I(trend^2)+season)
+```
+```{r}
+summary(mod1_reg)
+```
+
+Muy pocos coeficientes son significativos.
+
+```{r}
+checkresiduals(mod1_reg)
+```
+No cumple con la no autocorrelación de los residuos. 
+
+Entonces, vamos a probar ahora con las covariables
+
+```{r}
+temp <- ts(mingo$temp_prom_lag_1, start = c(2020, 9), frequency = 52)
+precip <- ts(mingo$precip_total_lag_1, start = c(2020, 9), frequency = 52)
+
+train_temp <- window(temp, start = c(2020, 9), end = c(2024, 52))
+test_temp <- window(temp, start = c(2025, 1), end = c(2025, 52))
+
+train_precip <- window(precip, start = c(2020, 9), end = c(2024, 52))
+test_precip <- window(precip, start = c(2025, 1), end = c(2025, 52))
+```
+
+```{r}
+acf2(train_temp, main = "")
+acf2(train_precip)
+```
+Ambas series son claramente estacionarias. Hay que solucionarlo. 
+
+```{r}
+temp_dif <- diff(train_temp, 1)
+adf.test(temp_dif) # Se soluciono
+```
+
+```{r}
+precip_dif <- diff(train_precip, 1) # PREGUNTA por que no puedo usar diferencacion 1 si uso 52 para ndvi
+acf2(precip_dif,  main = "", max.lag = 104)
+adf.test(precip_dif) # Se soluciono
+```
+```{r}
+temp_dif <- diff(train_temp, lag = 1)
+precip_dif <- diff(train_precip, lag = 1)
+temp_dif = window(temp_dif, start = c(2021, 9), end = c(2024, 52))
+precip_dif = window(precip_dif, start = c(2021, 9), end = c(2024, 52))
+```
+
+```{r}
+mod2_reg = tslm(ndvi_dif ~ temp_dif + precip_dif)
+```
+
+```{r}
+summary(mod2_reg) # Ninguno es significativo
+```
+
+```{r}
+checkresiduals(mod2_reg)
+```
+
+Los residuos están autocorrelacionados. 
+
+
+Ahora, vamos a ver si al modelar la tendencia de la serie diferenciada se soluciona la autocorrelacion.
+
+```{r}
+mod3_reg <- tslm(ndvi_dif ~ trend+I(trend^2))
+```
+
+```{r}
+summary(mod3_reg)
+```
+```{r}
+checkresiduals(mod3_reg)
+```
+
+No :( Probemos con regresión de Fourier
+
+```{r}
+mod4_reg <- tslm(train ~ trend + I(trend^2) + fourier(train, K = 1))
+```
+```{r}
+summary(mod4_reg)
+```
+
+```{r}
+checkresiduals(mod4_reg)
+```
+
+En ninguno de los casos se cumple. Por ende, vamos a intentar con regresión dinámica.
+
+```{r}
+forecast_reg_1 <- forecast(mod1_reg, h = 52)
+
+last_year <- window(train, start = c(2024, 1), end = c(2024, 52))
+
+newdata_2025 <- data.frame(
+  temp_dif = diff(c(tail(train_temp, 1), test_temp)),  
+  precip_dif = diff(c(tail(train_precip, 1), test_precip))  
+)
+forecast_reg_2 <- forecast(mod2_reg, newdata = newdata_2025,
+                           h = 52)
+pred_mean_2 <- ts(tail(diffinv(as.numeric(forecast_reg_2$mean), lag = 52, xi = as.numeric(last_year)), -52), start = 2025, frequency = 52)
+
+forecast_reg_3 <- forecast(mod3_reg, h = 52)
+pred_mean_3 <- ts(tail(diffinv(as.numeric(forecast_reg_3$mean), lag = 52, xi = as.numeric(last_year)), -52), start = 2025, frequency = 52)
+n <- length(train)
+
+future_fourier <- data.frame(trend = (n + 1):(n + 52), fourier(train, K = 1, h = 52))
+forecast_reg_4 <- forecast(mod4_reg, newdata = future_fourier, h = 52)
+```
+
+```{r}
+accuracy(as.numeric(forecast_reg_1$mean), as.numeric(test))
+accuracy(as.numeric(pred_mean_2), as.numeric(test))
+accuracy(as.numeric(pred_mean_3), as.numeric(test))
+accuracy(as.numeric(forecast_reg_4$mean), as.numeric(test))
+```
+
+
+```{r}
+autoplot(forecast_reg_1) +
+  autolayer(test, series = "Actual Test Data",
+            color = "red", linetype = "dashed") +
+  labs(
+    title = "NDVI Reales (rojo) contra predichos (azul)",
+    x = "Semana",
+    y = "NDVI"
+  ) +
+  guides(
+    colour = guide_legend(title = "Series"),
+    fill = "none"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+```{r}
+lower_95_2 <- ts(as.numeric(forecast_reg_2$lower[, 2]) + as.numeric(last_year), start = c(2025, 1), frequency = 52)
+upper_95_2 <- ts(as.numeric(forecast_reg_2$upper[, 2]) + as.numeric(last_year), start = c(2025, 1), frequency = 52)
+
+df_fc_2 <- data.frame(
+  Time = as.numeric(time(pred_mean_2)),
+  Mean = as.numeric(pred_mean_2),
+  Lower95 = as.numeric(lower_95_2),
+  Upper95 = as.numeric(upper_95_2)
+)
+
+autoplot(train) +
+  geom_ribbon(data = df_fc_2, aes(x = Time, ymin = Lower95, ymax = Upper95, fill = "95%"), alpha = 0.2, inherit.aes = FALSE) +
+  autolayer(pred_mean_2, series = "Predicción", color = "blue") +
+  autolayer(test, series = "Actual Test Data", color = "red", linetype = "dashed") +
+  scale_fill_manual(name = "Intervalos", values = c("95%" = "blue")) +
+  labs(
+    title = "NDVI Reales (rojo) contra predichos (azul)",
+    x = "Semana",
+    y = "NDVI"
+  ) +
+  guides(
+    colour = guide_legend(title = "Series"),
+    fill = guide_legend(title = "Intervalos")
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+```{r}
+lower_95_3 <- ts(as.numeric(forecast_reg_3$lower[, 2]) + as.numeric(last_year), start = c(2025, 1), frequency = 52)
+upper_95_3 <- ts(as.numeric(forecast_reg_3$upper[, 2]) + as.numeric(last_year), start = c(2025, 1), frequency = 52)
+
+df_fc_3 <- data.frame(
+  Time = as.numeric(time(pred_mean_3)),
+  Mean = as.numeric(pred_mean_3),
+  Lower95 = as.numeric(lower_95_3),
+  Upper95 = as.numeric(upper_95_3)
+)
+
+autoplot(train) +
+  geom_ribbon(data = df_fc_3, aes(x = Time, ymin = Lower95, ymax = Upper95, fill = "95%"), alpha = 0.2, inherit.aes = FALSE) +
+  autolayer(pred_mean_3, series = "Predicción", color = "blue") +
+  autolayer(test, series = "Actual Test Data", color = "red", linetype = "dashed") +
+  scale_fill_manual(name = "Intervalos", values = c("95%" = "blue")) +
+  labs(
+    title = "NDVI Reales (rojo) contra predichos (azul)",
+    x = "Semana",
+    y = "NDVI"
+  ) +
+  guides(
+    colour = guide_legend(title = "Series"),
+    fill = guide_legend(title = "Intervalos")
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+```
+
+
+
+# Regresión dinámica
+
+```{r}
+res1=residuals(mod1_reg)
+res2=residuals(mod2_reg)
+res3=residuals(mod3_reg)
+res4=residuals(mod4_reg)
+```
+
+###Res mod 1
+```{r}
+plot(res1)
+```
+
+```{r}
+acf(res1, lag.max = 208)
+adf.test(res1)
+```
+
+```{r}
+acf2(res1)
+```
+
+```{r}
+mod_res1=Arima(res1, order = c(3, 0, 0),  seasonal = list(order = c(1, 1, 0), period = 52))
+```
+
+Regresión dinámica
+```{r}
+#mod1_reg <- tslm(ndvi ~ trend+I(trend^2)+season)
+```
+
+```{r}
+X <- cbind(
+  trend = seq_along(train),
+  trend2 = seq_along(train)^2,
+)
+mod1_dim<- Arima(
+  train,
+  order = c(3,0,0),
+  seasonal = list(order = c(1, 1, 0), period = 52),
+  xreg = X,
+  include.mean = TRUE
+)
+```
+
+```{r}
+summary(mod1_dim)
+```
+
+###Res mod 2
+```{r}
+plot(res2)
+```
+
+```{r}
+acf(res2, lag.max = 104)
+adf.test(res2)
+```
+```{r}
+acf2(res2, max.lag = 104)
+```
+
+```{r}
+mod_res1=Arima(res2, order = c(3, 0, 0),  seasonal = list(order = c(1, 0, 0), period = 52))
+```
+
+Regresión dinámica
+```{r}
+#mod2_din = tslm(ndvi_dif ~ temp_dif + precip_dif)
+```
+
+```{r}
+temp_dif_1 <- diff(train_temp, 1)
+precip_dif_1 <- diff(train_precip, 1)
+X <- cbind(
+  temp_dif = temp_dif_1,
+  precip_dif = precip_dif_1
+)
+mod2_dim <- Arima(
+  train[2:length(train)],
+  order = c(3,0,0),
+  seasonal = list(order = c(1, 1, 0), period = 52),
+  xreg = X,
+  include.mean = TRUE
+)
+```
+
+###Res mod 3
+
+```{r}
+plot(res3)
+```
+
+```{r}
+acf(res3, lag.max = 208)
+adf.test(res3)
+```
+
+```{r}
+acf2(res3)
+```
+
+```{r}
+mod_res3=Arima(res3, order = c(3, 0, 0),  seasonal = list(order = c(1, 0, 0), period = 52))
+```
+
+Regresión dinámica
+```{r}
+mod3_reg <- tslm(ndvi_dif ~ trend+I(trend^2))
+```
+
+```{r}
+X <- cbind(
+  trend = seq_along(ndvi_dif),
+  trend2 = seq_along(ndvi_dif)^2
+)
+mod3_dim<- Arima(
+  ndvi_dif,
+  order = c(3,0,0),
+  seasonal = list(order = c(1, 0, 0), period = 52),
+  xreg = X,
+  include.mean = TRUE
+)
+```
+
+###Res mod 4
+```{r}
+plot(res4)
+```
+
+```{r}
+acf(res4, lag.max = 208)
+adf.test(res4)
+```
+
+```{r}
+acf2(res4)
+```
+
+```{r}
+mod_res4=Arima(res4, order = c(3, 0, 0))
+```
+
+Regresión dinámica
+```{r}
+mod4_reg <- tslm(ndvi ~ trend + I(trend^2) + fourier(ndvi, K = 1))
+```
+#con fourier
+```{r}
+X <- cbind(
+  trend = seq_along(train),
+  trend2 = seq_along(train)^2, 
+  F=fourier(train, K = 1)
+)
+
+mod4_dim<- Arima(
+  train,
+  order = c(3,0,0),
+  seasonal = list(order = c(1, 0, 0), period = 52),
+  xreg = X,
+  include.mean = FALSE
+)
+```
+
+#Revisión de supuestos y normalidad
+
+###res1
+```{r}
+checkresiduals(mod1_dim)
+shapiro.test(mod1_dim$residuals)
+qqPlot(mod1_dim$residuals)
+```
+
+###res 2
+
+```{r}
+checkresiduals(mod2_dim)
+shapiro.test(mod2_dim$residuals)
+qqPlot(mod2_dim$residuals)
+```
+
+###res 3
+```{r}
+checkresiduals(mod3_dim)
+shapiro.test(mod3_dim$residuals)
+qqPlot(mod3_dim$residuals)
+```
+
+### res 4 con fourier
+```{r}
+checkresiduals(mod4_dim)
+shapiro.test(mod4_dim$residuals)
+qqPlot(mod4_dim$residuals)
+```
+
+###Predicciones
+
+En ninguno de los casos se cumple. Por ende, vamos a intentar con regresión dinámica.
+
+```{r}
+X <- cbind(
+  trend = length(train) + seq_along(test),
+  trend2 = (length(train) + seq_along(test))^2
+)
+
+forecast_dim_1 <- forecast(mod1_dim, xreg = X, h = 52)
+
+last_year <- window(train, start = c(2024, 1), end = c(2024, 52))
+
+newdata_2025 <- data.frame(
+  temp_dif =diff(c(tail(train_temp, 1), test_temp)),     
+  precip_dif = diff(c(tail(train_precip, 1), test_precip))  
+)
+
+forecast_dim_2 <- forecast(mod2_dim, xreg = as.matrix(newdata_2025),
+                           h = 52)
+
+X <- cbind(
+  trend = length(ndvi_dif) + seq_along(diffinv(test, 52)),
+  trend2 = (length(ndvi_dif) + seq_along(test))^2
+)
+
+forecast_dim_3 <- forecast(mod3_dim, xreg = X, h = 52)
+pred_mean_dim_3 <- ts(tail(diffinv(as.numeric(forecast_dim_3$mean), lag = 52, xi = as.numeric(last_year)), -52), start = 2025, frequency = 52)
+n <- length(train)
+
+X <- cbind(
+  trend = length(train) + seq_along(test),
+  trend2 = (length(train) + seq_along(test))^2, 
+  F=fourier(train, K = 1, h = 52)
+)
+forecast_dim_4 <- forecast(mod4_dim, xreg = X, h = 52)
+```
+
+```{r}
+accuracy(as.numeric(forecast_dim_1$mean), as.numeric(test))
+accuracy(as.numeric(forecast_dim_2$mean), as.numeric(test))
+accuracy(as.numeric(pred_mean_dim_3), as.numeric(test))
+accuracy(as.numeric(forecast_dim_4$mean), as.numeric(test))
+```
+
+
+```{r}
+autoplot(ndvi) +
+  autolayer( fitted(mod1_dim))
+
+autoplot(ndvi) + 
+  autolayer(y_pred_2)
+
+autoplot(ndvi) + 
+  autolayer(y_pred_3)
+
+autoplot(ndvi) +
+  autolayer(fitted(mod4_dim))
+
+autoplot(ndvi) +
+  autolayer(fitted(mod4.dif_dim))
+```
